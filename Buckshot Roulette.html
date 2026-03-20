@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<title>Buckshot Roulette</title>
+		<style>
+html, body, #canvas {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+body {
+	color: white;
+	background-color: black;
+	overflow: hidden;
+	touch-action: none;
+}
+
+#canvas {
+	display: block;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+#status, #status-splash, #status-progress {
+	position: absolute;
+	left: 0;
+	right: 0;
+}
+
+#status, #status-splash {
+	top: 0;
+	bottom: 0;
+}
+
+#status {
+	background-color: #000000;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	visibility: hidden;
+}
+
+#status-splash {
+	max-height: 100%;
+	max-width: 100%;
+	margin: auto;
+}
+
+#status-splash.show-image--false {
+	display: none;
+}
+
+#status-splash.fullsize--true {
+	height: 100%;
+	width: 100%;
+	object-fit: contain;
+}
+
+#status-splash.use-filter--false {
+	image-rendering: pixelated;
+}
+
+#status-progress, #status-notice {
+	display: none;
+}
+
+#status-progress {
+	bottom: 10%;
+	width: 50%;
+	margin: 0 auto;
+}
+
+#status-notice {
+	background-color: #5b3943;
+	border-radius: 0.5rem;
+	border: 1px solid #9b3943;
+	color: #e0e0e0;
+	font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
+	line-height: 1.3;
+	margin: 0 2rem;
+	overflow: hidden;
+	padding: 1rem;
+	text-align: center;
+	z-index: 1;
+}
+		</style>
+		<link id="-gd-engine-icon" rel="icon" type="image/png" href="Buckshot Roulette.icon.png" />
+<link rel="apple-touch-icon" href="Buckshot Roulette.apple-touch-icon.png"/>
+
+	</head>
+	<body>
+		<canvas id="canvas">
+			Your browser does not support the canvas tag.
+		</canvas>
+
+		<noscript>
+			Your browser does not support JavaScript.
+		</noscript>
+
+		<div id="status">
+			<img id="status-splash" class="show-image--false fullsize--true use-filter--true" src="Buckshot Roulette.png" alt="">
+			<progress id="status-progress"></progress>
+			<div id="status-notice"></div>
+		</div>
+
+		<script src="Buckshot Roulette.js"></script>
+		<script>
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"Buckshot Roulette","experimentalVK":false,"fileSizes":{"Buckshot Roulette.pck":720811064,"Buckshot Roulette.wasm":35739700},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_THREADS_ENABLED = false;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const statusOverlay = document.getElementById('status');
+	const statusProgress = document.getElementById('status-progress');
+	const statusNotice = document.getElementById('status-notice');
+
+	let initializing = true;
+	let statusMode = '';
+
+	function setStatusMode(mode) {
+		if (statusMode === mode || !initializing) {
+			return;
+		}
+		if (mode === 'hidden') {
+			statusOverlay.remove();
+			initializing = false;
+			return;
+		}
+		statusOverlay.style.visibility = 'visible';
+		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
+		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
+		statusMode = mode;
+	}
+
+	function setStatusNotice(text) {
+		while (statusNotice.lastChild) {
+			statusNotice.removeChild(statusNotice.lastChild);
+		}
+		const lines = text.split('\n');
+		lines.forEach((line) => {
+			statusNotice.appendChild(document.createTextNode(line));
+			statusNotice.appendChild(document.createElement('br'));
+		});
+	}
+
+	function displayFailureNotice(err) {
+		console.error(err);
+		if (err instanceof Error) {
+			setStatusNotice(err.message);
+		} else if (typeof err === 'string') {
+			setStatusNotice(err);
+		} else {
+			setStatusNotice('An unknown error occurred.');
+		}
+		setStatusMode('notice');
+		initializing = false;
+	}
+
+	const missing = Engine.getMissingFeatures({
+		threads: GODOT_THREADS_ENABLED,
+	});
+
+	if (missing.length !== 0) {
+		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
+			let serviceWorkerRegistrationPromise;
+			try {
+				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
+			} catch (err) {
+				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
+			}
+			Promise.race([
+				serviceWorkerRegistrationPromise.then((registration) => {
+					if (registration != null) {
+						return Promise.reject(new Error('Service worker already exists.'));
+					}
+					return registration;
+				}).then(() => engine.installServiceWorker()),
+				new Promise((resolve) => {
+					setTimeout(() => resolve(), 2000);
+				}),
+			]).then(() => {
+				window.location.reload();
+			}).catch((err) => {
+				console.error('Error while registering service worker:', err);
+			});
+		} else {
+			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+			displayFailureNotice(missingMsg + missing.join('\n'));
+		}
+	} else {
+		setStatusMode('progress');
+
+		// ── Part-file merger ─────────────────────────────────────────────────
+		// Fetches all split parts, merges into a single blob in memory,
+		// then patches window.fetch so Godot receives the merged files.
+		const PCK_PARTS  = 38; // part01 – part38
+		const WASM_PARTS = 2;  // part1 – part2
+		const PCK_NAME   = "Buckshot Roulette.pck";
+		const WASM_NAME  = "Buckshot Roulette.wasm";
+
+		function zeroPad(n, pad) { return (pad && n < 10) ? "0" + n : String(n); }
+
+		function mergeParts(baseName, totalParts, pad) {
+			return new Promise(function(resolve, reject) {
+				var buffers = [];
+				var loaded = 0;
+				function fetchPart(index) {
+					if (index > totalParts) {
+						resolve(URL.createObjectURL(new Blob(buffers)));
+						return;
+					}
+					var url = baseName + ".part" + zeroPad(index, pad);
+					fetch(url).then(function(r) {
+						if (!r.ok) throw new Error("Missing part: " + url);
+						return r.arrayBuffer();
+					}).then(function(buf) {
+						buffers.push(buf);
+						loaded++;
+						fetchPart(index + 1);
+					}).catch(reject);
+				}
+				fetchPart(1);
+			});
+		}
+
+		// Merge both files in parallel, show combined progress
+		var totalParts = PCK_PARTS + WASM_PARTS;
+		var partsLoaded = 0;
+		statusProgress.value = 0;
+		statusProgress.max = totalParts;
+
+		Promise.all([
+			mergeParts(PCK_NAME, PCK_PARTS, true),
+			mergeParts(WASM_NAME, WASM_PARTS, false)
+		]).then(function(results) {
+			var pckBlobUrl  = results[0];
+			var wasmBlobUrl = results[1];
+
+			// Patch fetch: redirect .pck and .wasm requests to merged blobs
+			var _origFetch = window.fetch;
+			window.fetch = function(url) {
+				var args = Array.prototype.slice.call(arguments, 1);
+				if (typeof url === "string") {
+					if (url.indexOf("Buckshot Roulette.pck") !== -1) {
+						return _origFetch.apply(window, [pckBlobUrl].concat(args));
+					}
+					if (url.indexOf("Buckshot Roulette.wasm") !== -1) {
+						return _origFetch.apply(window, [wasmBlobUrl].concat(args));
+					}
+				}
+				return _origFetch.apply(window, arguments);
+			};
+
+			engine.startGame({
+				'onProgress': function (current, total) {
+					if (current > 0 && total > 0) {
+						statusProgress.value = current;
+						statusProgress.max = total;
+					} else {
+						statusProgress.removeAttribute('value');
+						statusProgress.removeAttribute('max');
+					}
+				},
+			}).then(function() {
+				setStatusMode('hidden');
+			}, displayFailureNotice);
+
+		}, displayFailureNotice);
+	}
+}());
+		</script>
+
+		<!-- PeerJS Multiplayer Bridge -->
+		<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+		<script>
+// Firebase URL for lobby cleanup on unload
+const FIREBASE_LOBBY_URL = 'https://buckshot-lobby-search-default-rtdb.firebaseio.com';
+
+window.PeerBridge = (function() {
+  let peer = null;
+  let connections = {};
+  let incomingQueue = [];
+  let myId = null;
+  let locked = false;
+  let connectionTimeouts = {}; // track pending connection attempts
+
+  function init(desiredId) {
+    if (peer && !peer.destroyed) {
+      console.log('[PeerBridge] Reusing existing peer:', peer.id);
+      window._godot_peer_id = peer.id;
+      return Promise.resolve(peer.id);
+    }
+    if (locked) {
+      console.log('[PeerBridge] init blocked - peer locked');
+      return Promise.resolve(myId || '');
+    }
+    return new Promise((resolve) => {
+      var peerConfig = {
+        config: {
+          iceServers: [
+            // Google STUN — fast, no auth needed
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            // Open Relay TURN — free, no signup, bypasses most firewalls
+            // Port 80 UDP
+            {
+              urls: "turn:openrelay.metered.ca:80",
+              username: "openrelayproject",
+              credential: "openrelayproject"
+            },
+            // Port 443 UDP
+            {
+              urls: "turn:openrelay.metered.ca:443",
+              username: "openrelayproject",
+              credential: "openrelayproject"
+            },
+            // Port 443 TCP — almost never blocked, same port as HTTPS
+            // This is the one that bypasses school firewalls
+            {
+              urls: "turn:openrelay.metered.ca:443?transport=tcp",
+              username: "openrelayproject",
+              credential: "openrelayproject"
+            }
+          ]
+        }
+      };
+      peer = desiredId ? new Peer(desiredId, peerConfig) : new Peer(peerConfig);
+
+      peer.on('open', function(id) {
+        myId = id;
+        window._godot_peer_id = id;
+        console.log('[PeerBridge] My peer ID:', id);
+        startKeepalive();
+        resolve(id);
+      });
+
+      peer.on('connection', function(conn) {
+        console.log('[PeerBridge] Incoming connection from:', conn.peer);
+        _setupConnection(conn);
+      });
+
+      peer.on('error', function(err) {
+        console.error('[PeerBridge] PeerJS error:', err);
+        // If this is a "could not connect to peer" error, signal a join failure
+        var msg = err.message || String(err);
+        if (msg.indexOf('Could not connect to peer') !== -1 || err.type === 'peer-unavailable') {
+          window._godot_lobby_join_error = 'Lobby not found or host has left.';
+          console.warn('[PeerBridge] Host unreachable — signalling join failure to Godot');
+        }
+        incomingQueue.push(JSON.stringify({
+          _bridge_event: 'error',
+          message: msg
+        }));
+      });
+    });
+  }
+
+  function connectTo(hostId, myName) {
+    return new Promise((resolve, reject) => {
+      if (!peer) { reject('PeerBridge not initialized'); return; }
+
+      // Timeout: if no connection within 8 seconds, reject
+      var timeout = setTimeout(function() {
+        console.warn('[PeerBridge] Connection to', hostId, 'timed out');
+        window._godot_lobby_join_error = 'Connection timed out. Host may have left.';
+        reject('Connection timed out');
+      }, 8000);
+      connectionTimeouts[hostId] = timeout;
+
+      const conn = peer.connect(hostId, {
+        reliable: true,
+        metadata: { name: myName }
+      });
+      conn.on('open', function() {
+        clearTimeout(connectionTimeouts[hostId]);
+        delete connectionTimeouts[hostId];
+        console.log('[PeerBridge] Connected to host:', hostId);
+        _setupConnection(conn);
+        resolve(hostId);
+      });
+      conn.on('error', function(err) {
+        clearTimeout(connectionTimeouts[hostId]);
+        delete connectionTimeouts[hostId];
+        console.error('[PeerBridge] Connection error:', err);
+        window._godot_lobby_join_error = 'Connection failed: ' + (err.message || String(err));
+        reject(err);
+      });
+    });
+  }
+
+  function _setupConnection(conn) {
+    connections[conn.peer] = conn;
+    conn.on('data', function(data) {
+      incomingQueue.push(JSON.stringify({
+        _bridge_event: 'data',
+        from: conn.peer,
+        from_name: conn.metadata ? conn.metadata.name : '',
+        data: data
+      }));
+    });
+    conn.on('close', function() {
+      console.log('[PeerBridge] Connection closed:', conn.peer);
+      delete connections[conn.peer];
+      incomingQueue.push(JSON.stringify({
+        _bridge_event: 'disconnect',
+        peer_id: conn.peer
+      }));
+    });
+    conn.on('error', function(err) {
+      console.error('[PeerBridge] Conn error from', conn.peer, err);
+    });
+    incomingQueue.push(JSON.stringify({
+      _bridge_event: 'connected',
+      peer_id: conn.peer,
+      peer_name: conn.metadata ? conn.metadata.name : ''
+    }));
+  }
+
+  function sendTo(peerId, dataObj) {
+    if (connections[peerId]) {
+      connections[peerId].send(dataObj);
+      return true;
+    }
+    console.warn('[PeerBridge] No connection to:', peerId);
+    return false;
+  }
+
+  function sendToAll(dataObj) {
+    for (const id in connections) {
+      connections[id].send(dataObj);
+    }
+  }
+
+  function pollPacket() {
+    if (incomingQueue.length > 0) {
+      return incomingQueue.shift();
+    }
+    return "";
+  }
+
+  function disconnect(peerId) {
+    if (connections[peerId]) {
+      connections[peerId].close();
+      delete connections[peerId];
+    }
+  }
+
+  function destroyPeer() {
+    console.warn('[PeerBridge] destroyPeer called! locked=' + locked);
+    if (locked) {
+      console.warn('[PeerBridge] destroyPeer BLOCKED by lock');
+      return;
+    }
+    if (peer) {
+      peer.destroy();
+      peer = null;
+      connections = {};
+      myId = null;
+    }
+  }
+
+  function startKeepalive() {
+    setInterval(function() {
+      for (var id in connections) {
+        try {
+          if (connections[id].open) {
+            connections[id].send({"_keepalive": true});
+          }
+        } catch(e) {}
+      }
+    }, 1000);
+  }
+
+  function clearQueue() { incomingQueue = []; console.log('[PeerBridge] queue cleared'); }
+  function isAlive() { return !!(peer && !peer.destroyed); }
+  function lockPeer() { locked = true; console.log('[PeerBridge] peer locked'); }
+  function unlockPeer() { locked = false; console.log('[PeerBridge] peer unlocked'); }
+  function getMyId() { return myId || ""; }
+  function getConnectedPeers() { return Object.keys(connections); }
+
+  return {
+    init,
+    connectTo,
+    sendTo,
+    sendToAll,
+    pollPacket,
+    disconnect,
+    destroyPeer,
+    clearQueue,
+    isAlive,
+    lockPeer,
+    unlockPeer,
+    getMyId,
+    getConnectedPeers,
+  };
+})();
+
+// ── Auto-cleanup on tab close / refresh ─────────────────────────────────────
+// Uses sendBeacon so it fires even when the page is unloading
+window.addEventListener('beforeunload', function() {
+  // Destroy peer connections
+  try { window.PeerBridge.destroyPeer(); } catch(e) {}
+
+  // Remove lobby from Firebase if we were hosting
+  var lobbyId = window._godot_lobby_id_to_cleanup || '';
+  if (lobbyId !== '') {
+    var url = FIREBASE_LOBBY_URL + '/lobbies/' + lobbyId + '.json';
+    // sendBeacon works reliably on page unload unlike fetch
+    navigator.sendBeacon(url + '?method=DELETE', '');
+    // Also try fetch as backup (may not complete but worth trying)
+    try {
+      fetch(url, { method: 'DELETE', keepalive: true });
+    } catch(e) {}
+  }
+});
+
+// Godot sets this when hosting so we know which lobby to clean up
+window._godot_lobby_id_to_cleanup = '';
+		</script>
+
+	</body>
+</html>
